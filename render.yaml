@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: typeracer-clone
+    env: go
+    buildCommand: |
+      cd frontend && npm install && npm run build && cd .. && go build -o server server.go
+    startCommand: ./server
+    envVars:
+      - key: PORT
+        value: 10000

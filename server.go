@@ -1,19 +1,24 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"math/rand"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+//go:embed frontend/dist
+var embeddedFrontend embed.FS
 
 // ─── PASSAGES ──────────────────────────────────────────────────────────────
 
@@ -365,18 +370,43 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 // ─── STATIC FILE SERVER ────────────────────────────────────────────────────
 
 func staticHandler(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-	if path == "/" {
-		path = "/index.html"
+	filePath := r.URL.Path
+	if filePath == "/" {
+		filePath = "/index.html"
 	}
-	// Try frontend/dist first (production build), then frontend/ (dev)
-	dirs := []string{"frontend/dist", "frontend"}
-	for _, dir := range dirs {
-		fp := filepath.Join(dir, path)
-		if _, err := os.Stat(fp); err == nil {
-			http.ServeFile(w, r, fp)
+	// Try embedded frontend/dist first (production)
+	subFS, err := fs.Sub(embeddedFrontend, "frontend/dist")
+	if err == nil {
+		data, err := fs.ReadFile(subFS, path.Clean(filePath))
+		if err == nil {
+			ext := path.Ext(filePath)
+			mime := map[string]string{
+				".html": "text/html",
+				".css":  "text/css",
+				".js":   "application/javascript",
+				".json": "application/json",
+				".svg":  "image/svg+xml",
+				".png":  "image/png",
+				".ico":  "image/x-icon",
+			}
+			if ct, ok := mime[ext]; ok {
+				w.Header().Set("Content-Type", ct)
+			}
+			w.Write(data)
 			return
 		}
+	}
+	// Fallback: try frontend/dist from disk (dev)
+	diskPath := "frontend/dist" + filePath
+	if _, err := os.Stat(diskPath); err == nil {
+		http.ServeFile(w, r, diskPath)
+		return
+	}
+	// Last fallback: frontend/ from disk (dev without build)
+	devPath := "frontend" + filePath
+	if _, err := os.Stat(devPath); err == nil {
+		http.ServeFile(w, r, devPath)
+		return
 	}
 	http.NotFound(w, r)
 }
